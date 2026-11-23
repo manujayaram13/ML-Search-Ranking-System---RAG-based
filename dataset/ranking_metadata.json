@@ -1,0 +1,13 @@
+{
+  "name": "Advanced Universal Multi-Domain Learning-to-Rank (LTR) Dataset v2.5",
+  "version": "2.5.0",
+  "total_queries": 280,
+  "train_queries": 224,
+  "validation_queries": 56,
+  "total_candidate_rows": 7560,
+  "train_candidate_rows": 6048,
+  "validation_candidate_rows": 1512,
+  "target_column": "relevance_label",
+  "group_column": "qid",
+  "feature_count": 42
+}
