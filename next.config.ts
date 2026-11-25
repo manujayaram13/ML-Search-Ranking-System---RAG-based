@@ -1,7 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: [
+    "@ffmpeg-installer/ffmpeg",
+    "@ffprobe-installer/ffprobe",
+    "fluent-ffmpeg",
+    "sharp",
+  ],
+  outputFileTracingIncludes: {
+    "/api/search": ["./model/**/*"],
+    "/api/search-by-image": ["./model/**/*"],
+  },
 };
 
 export default nextConfig;
