@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { supabase } from '@/lib/supabase'
+import { getBrowserSupabase } from '@/lib/supabase'
 import Link from 'next/link'
 import CinematicBackground from '@/components/CinematicBackground'
 
@@ -59,16 +59,17 @@ export default function Home() {
 
   // Load uploaded files history
   const loadAssets = async () => {
-    const { data, error } = await supabase
-      .from('assets')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error(error)
-      return
+    try {
+      const res = await fetch('/api/assets', { cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        console.error('Failed to load assets:', data.error || res.statusText)
+        return
+      }
+      setAssets(data.assets || [])
+    } catch (err) {
+      console.error('Failed to load assets:', err)
     }
-    setAssets(data || [])
   }
 
   useEffect(() => {
@@ -179,6 +180,8 @@ export default function Home() {
     setMessage(`Uploading and processing ${selectedFiles.length} file(s)...`)
 
     try {
+      const client = await getBrowserSupabase()
+
       const uploadPromises = selectedFiles.map(async (f) => {
         let fileType = 'document'
         if (f.type.startsWith('image/')) fileType = 'image'
@@ -190,19 +193,21 @@ export default function Home() {
         const folder = fileType === 'document' ? 'documents' : fileType === 'image' ? 'images' : 'videos'
         const filePath = `${folder}/${fileName}`
 
-        const { error: uploadError } = await supabase.storage
+        const { error: uploadError } = await client.storage
           .from(folder)
-          .upload(filePath, f)
+          .upload(filePath, f, {
+            contentType: f.type || 'application/octet-stream',
+          })
 
         if (uploadError) throw new Error(`${f.name}: ${uploadError.message}`)
 
-        const { data: newAsset, error: dbError } = await supabase
+        const { data: newAsset, error: dbError } = await client
           .from('assets')
           .insert({
             filename: fileName,
             original_name: f.name,
             file_type: fileType,
-            mime_type: f.type,
+            mime_type: f.type || 'application/octet-stream',
             file_path: filePath,
             file_size: f.size,
             status: 'processing'

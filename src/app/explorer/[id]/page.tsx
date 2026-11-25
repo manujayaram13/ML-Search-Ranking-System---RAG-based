@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import CinematicBackground from '@/components/CinematicBackground'
 
@@ -74,6 +73,7 @@ export default function AssetDetail() {
   const [mediaUrl, setMediaUrl] = useState<string>('')
   const [keyframeUrls, setKeyframeUrls] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState<boolean>(true)
+  const [errorMsg, setErrorMsg] = useState<string>('')
   const [rawJsonModal, setRawJsonModal] = useState<boolean>(false)
 
   const loadAssetDetails = async () => {
@@ -81,86 +81,23 @@ export default function AssetDetail() {
     setLoading(true)
 
     try {
-      const { data: assetData, error: assetErr } = await supabase
-        .from('assets')
-        .select('*')
-        .eq('id', assetId)
-        .single()
-
-      if (assetErr || !assetData) {
-        console.error('Asset fetch error:', assetErr)
-        setLoading(false)
-        return
-      }
-
-      const { data: segsData, error: segsErr } = await supabase
-        .from('segments')
-        .select('*')
-        .eq('asset_id', assetId)
-        .order('created_at', { ascending: true })
-
-      if (segsErr) throw segsErr
-
-      const segments = segsData || []
-      const segmentIds = segments.map(s => s.id)
-
-      let embeddingsData: any[] = []
-      if (segmentIds.length > 0) {
-        const { data: embData, error: embErr } = await supabase
-          .from('embeddings')
-          .select('*')
-          .in('segment_id', segmentIds)
-
-        if (!embErr && embData) {
-          embeddingsData = embData
-        }
-      }
-
-      const embMap = new Map<string, Embedding[]>()
-      embeddingsData.forEach(e => {
-        const list = embMap.get(e.segment_id) || []
-        list.push(e)
-        embMap.set(e.segment_id, list)
+      const res = await fetch(`/api/assets/${encodeURIComponent(assetId)}`, {
+        cache: 'no-store'
       })
+      const data = await res.json()
 
-      const enrichedSegments: Segment[] = segments.map(s => ({
-        ...s,
-        embeddings: embMap.get(s.id) || []
-      }))
-
-      setAsset({
-        ...assetData,
-        segments: enrichedSegments
-      })
-
-      if (assetData.file_path) {
-        const bucket = assetData.file_type === 'image' ? 'images' : assetData.file_type === 'video' ? 'videos' : 'documents'
-        try {
-          const { data: signedData } = await supabase.storage.from(bucket).createSignedUrl(assetData.file_path, 7200)
-          setMediaUrl(signedData?.signedUrl || '')
-        } catch (e) {
-          const { data: pubData } = supabase.storage.from(bucket).getPublicUrl(assetData.file_path)
-          setMediaUrl(pubData?.publicUrl || '')
-        }
+      if (!res.ok || data.error || !data.asset) {
+        throw new Error(data.error || `Asset fetch failed (${res.status})`)
       }
 
-      const kfUrls: Record<string, string> = {}
-      for (const seg of enrichedSegments) {
-        if (seg.segment_type === 'keyframe' && seg.metadata?.media_path) {
-          const path = seg.metadata.media_path
-          try {
-            const { data } = await supabase.storage.from('keyframes').createSignedUrl(path, 7200)
-            if (data?.signedUrl) kfUrls[path] = data.signedUrl
-          } catch (e) {
-            const { data: pubData } = supabase.storage.from('keyframes').getPublicUrl(path)
-            if (pubData?.publicUrl) kfUrls[path] = pubData.publicUrl
-          }
-        }
-      }
-      setKeyframeUrls(kfUrls)
-
-    } catch (err) {
+      setErrorMsg('')
+      setAsset(data.asset)
+      setMediaUrl(data.mediaUrl || '')
+      setKeyframeUrls(data.keyframeUrls || {})
+    } catch (err: any) {
       console.error('Failed to load asset details:', err)
+      setErrorMsg(err?.message || 'The requested file could not be loaded from the database.')
+      setAsset(null)
     } finally {
       setLoading(false)
     }
@@ -221,7 +158,9 @@ export default function AssetDetail() {
         <div className="text-center space-y-4 max-w-md transparent-glass p-9 rounded-3xl relative z-10">
           <div className="text-5xl animate-cute-drift">⚠️</div>
           <h2 className="text-2xl font-bold text-white">Asset Not Found</h2>
-          <p className="text-slate-300 text-sm">The requested file could not be loaded from the database.</p>
+          <p className="text-slate-300 text-sm">
+            {errorMsg || 'The requested file could not be loaded from the database.'}
+          </p>
           <Link
             href="/explorer"
             className="inline-block px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-indigo-600/30 active:scale-95"

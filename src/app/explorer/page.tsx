@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import CinematicBackground from '@/components/CinematicBackground'
 
@@ -24,99 +23,33 @@ export default function Explorer() {
   const [assets, setAssets] = useState<Asset[]>([])
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const [errorMsg, setErrorMsg] = useState<string>('')
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState<string>('')
 
-  const resolveMediaUrls = async (loadedAssets: Asset[]) => {
-    const urls: Record<string, string> = {}
-
-    for (const asset of loadedAssets) {
-      if (asset.file_path) {
-        const bucket = asset.file_type === 'image' ? 'images' : asset.file_type === 'video' ? 'videos' : 'documents'
-        const key = `${bucket}:${asset.file_path}`
-
-        try {
-          const { data } = await supabase.storage.from(bucket).createSignedUrl(asset.file_path, 7200)
-          urls[key] = data?.signedUrl || ''
-        } catch (e) {
-          const { data: pubData } = supabase.storage.from(bucket).getPublicUrl(asset.file_path)
-          urls[key] = pubData?.publicUrl || ''
-        }
-      }
-    }
-
-    setMediaUrls(urls)
-  }
-
-  const loadAssetsData = async () => {
-    setLoading(true)
+  const loadAssetsData = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
-      const { data: assetsData, error: assetsErr } = await supabase
-        .from('assets')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (assetsErr) throw assetsErr
-
-      if (!assetsData || assetsData.length === 0) {
-        setAssets([])
-        setLoading(false)
-        return
+      const res = await fetch('/api/assets', { cache: 'no-store' })
+      const data = await res.json()
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Failed to load explorer assets (${res.status})`)
       }
 
-      const assetIds = assetsData.map(a => a.id)
-
-      const { data: segmentsData } = await supabase
-        .from('segments')
-        .select('id, asset_id')
-        .in('asset_id', assetIds)
-
-      const segmentCountMap = new Map<string, number>()
-      const segmentIds: string[] = []
-
-      ;(segmentsData || []).forEach((s: any) => {
-        segmentCountMap.set(s.asset_id, (segmentCountMap.get(s.asset_id) || 0) + 1)
-        segmentIds.push(s.id)
-      })
-
-      let embeddingCountMap = new Map<string, number>()
-      if (segmentIds.length > 0) {
-        const { data: embData } = await supabase
-          .from('embeddings')
-          .select('id, segment_id')
-          .in('segment_id', segmentIds)
-
-        const segmentToAsset = new Map<string, string>()
-        ;(segmentsData || []).forEach((s: any) => {
-          segmentToAsset.set(s.id, s.asset_id)
-        })
-
-        ;(embData || []).forEach((e: any) => {
-          const aId = segmentToAsset.get(e.segment_id)
-          if (aId) {
-            embeddingCountMap.set(aId, (embeddingCountMap.get(aId) || 0) + 1)
-          }
-        })
-      }
-
-      const enrichedAssets: Asset[] = assetsData.map(asset => ({
-        ...asset,
-        segment_count: segmentCountMap.get(asset.id) || 0,
-        embedding_count: embeddingCountMap.get(asset.id) || 0
-      }))
-
-      setAssets(enrichedAssets)
-      resolveMediaUrls(enrichedAssets)
-    } catch (err) {
+      setErrorMsg('')
+      setAssets(data.assets || [])
+      setMediaUrls(data.mediaUrls || {})
+    } catch (err: any) {
       console.error('Failed to load explorer assets:', err)
+      setErrorMsg(err?.message || 'Failed to load assets from database.')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
-    loadAssetsData()
-    const interval = setInterval(loadAssetsData, 6000)
+    loadAssetsData(false)
+    const interval = setInterval(() => loadAssetsData(true), 6000)
     return () => clearInterval(interval)
   }, [])
 
@@ -201,7 +134,7 @@ export default function Explorer() {
           </div>
 
           <button
-            onClick={loadAssetsData}
+            onClick={() => loadAssetsData(false)}
             disabled={loading}
             className="self-start md:self-auto px-5 py-3 transparent-glass-button text-white rounded-2xl text-xs font-bold transition flex items-center gap-2 active:scale-95"
           >
@@ -275,6 +208,13 @@ export default function Explorer() {
             )}
           </div>
         </div>
+
+        {/* Error Banner */}
+        {errorMsg && (
+          <div className="rounded-2xl border border-rose-500/40 bg-rose-950/50 px-5 py-4 text-xs text-rose-200 font-medium">
+            Database Error: {errorMsg}
+          </div>
+        )}
 
         {/* Main Files Grid */}
         {filteredAssets.length === 0 ? (
